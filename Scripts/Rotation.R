@@ -10,131 +10,258 @@ library(dplyr)
 library(RColorBrewer)
 library(nbastatR)
 library(ggimage)
+library(tictoc)
 library(ggpubr)
 
 
 #### DESCRIPTION 
-## Code to plot two graphs: 
-# 1) Players' playing stints over game, with point differential in each stint 
-# 2) Game scoring margin, as away team points - home team points 
-# Set only GAME ID, rest automatically done when run 
-# May need to modify graph 2 margins to fit graph 1
+## 
+
 
 # csv with team names, slugs, colors 
 tms <- read_csv('/Users/davidetissino/Desktop/R/data/teams.csv')
-
 
 # increase buffer size for scraping
 Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 2)
 
 
+# Teams BOXSCORES Infos ====
 
-#### GAME ID ####
-game_id <- '0042300226'
-
-
-# headers
-headers <- c(
-  `Connection` = 'keep-alive',
-  `Accept` = 'application/json, text/plain, */*',
-  `x-nba-stats-token` = 'true',
-  `X-NewRelic-ID` = 'VQECWF5UChAHUlNTBwgBVw==',
-  `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
-  `x-nba-stats-origin` = 'stats',
-  `Sec-Fetch-Site` = 'same-origin',
-  `Sec-Fetch-Mode` = 'cors',
-  `Referer` = 'https://stats.nba.com/players/shooting/',
-  `Accept-Encoding` = 'gzip, deflate, br',
-  `Accept-Language` = 'en-US,en;q=0.9'
-)
-
-## SCRAPE GAME INFO ####
-### Rotation Infos ====
-url <- paste0('https://stats.nba.com/stats/gamerotation?GameID=', game_id)
-
-res <- GET(url = url, add_headers(.headers = headers))
-
-json_resp <- fromJSON(content(res, "text"))
-
-# two tabs, home & away
-home <- data.frame(json_resp[["resultSets"]][["rowSet"]][[2]])
-away <- data.frame(json_resp[["resultSets"]][["rowSet"]][[1]])
-
-colnames(home) <- json_resp[["resultSets"]][["headers"]][[1]]
-colnames(away) <- json_resp[["resultSets"]][["headers"]][[1]]
-
-home <- home %>%
-  clean_names() %>%
-  retype()
-
-away <- away %>%
-  clean_names() %>%
-  retype()
-
-# one player column 
-home$player <- paste0(home$player_first, ' ', home$player_last)
-away$player <- paste0(away$player_first, ' ', away$player_last)
-
-# add location column 
-home$location <- 'Home'
-away$location <- 'Away'
-
-# remove & clean some columns
-home <- home[, c(14, 13, 8:12, 1:7)]
-away <- away[, c(14, 13, 8:12, 1:7)]
-
-### merge into one #
-df <- rbind(home, away)
+## 2023-24 RS Team Logs ##
+# headers <- c(
+#   `Connection` = 'keep-alive',
+#   `Accept` = 'application/json, text/plain, */*',
+#   `x-nba-stats-token` = 'true',
+#   `X-NewRelic-ID` = 'VQECWF5UChAHUlNTBwgBVw==',
+#   `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+#   `x-nba-stats-origin` = 'stats',
+#   `Sec-Fetch-Site` = 'same-origin',
+#   `Sec-Fetch-Mode` = 'cors',
+#   `Referer` = 'https://stats.nba.com/players/shooting/',
+#   `Accept-Encoding` = 'gzip, deflate, br',
+#   `Accept-Language` = 'en-US,en;q=0.9'
+# )
+# 
+# url <- 'https://stats.nba.com/stats/leaguegamelog?Counter=1000&DateFrom=&DateTo=&Direction=DESC&ISTRound=&LeagueID=00&PlayerOrTeam=T&Season=2023-24&SeasonType=PlayIn&Sorter=DATE'
+# 
+# res <- GET(url = url, add_headers(.headers = headers))
+# 
+# json_resp <- fromJSON(content(res, "text"))
+# 
+# pi_logs_24 <- data.frame(json_resp$resultSets$rowSet)
+# 
+# colnames(pi_logs_24) <- json_resp[["resultSets"]][["headers"]][[1]]
 
 
-##### Time Formatting
-# time in strange format, function to convert to correct format
-convert_to_time_string <- function(seconds) {
-  time_strings <- sprintf("%02d:%02d", as.integer(seconds) %/% 60, as.integer(seconds) %% 60)
-  return(time_strings)
-}
+### Load CSV TMS Boxscores 2023-24  ====
+##### RS ----
+TMS_boxscores_24_RS <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/TeamBoxscore/2023-24/Boxscores_2023-24_RS.csv')
 
-# Correct format to in & out time home & away
-df$in_time_real <- lapply(df$in_time_real / 10, convert_to_time_string)
-df$out_time_real <- lapply(df$out_time_real / 10, convert_to_time_string)
+TMS_boxscores_24_RS$type <- 'RS'
 
-# epoch to convert to UNIX time
-date <- as.Date("2000-01-01")
+##### Play-In ----
+TMS_boxscores_24_pi <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/TeamBoxscore/2023-24/Boxscores_2023-24_pi.csv')
 
-# Convert "mm:ss" to Unix time (seconds since Unix Epoch)
-df$in_unix_time <- as.integer(as.POSIXct(paste(date, df$in_time_real), format = "%Y-%m-%d %M:%S"))
-df$out_unix_time <- as.integer(as.POSIXct(paste(date, df$out_time_real), format = "%Y-%m-%d %M:%S"))
+TMS_boxscores_24_pi$type <- 'pi'
+
+##### Playoffs ----
+TMS_boxscores_24_PO <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/TeamBoxscore/2023-24/Boxscores_2023-24_PO.csv')
+
+TMS_boxscores_24_PO$type <- 'PO'
 
 
-# remove some columns
-df <- df[, -c(7, 9:14)]
+# Merge into one 
+### Teams Boxscores 2023-24 ====
+TMS_boxscores_24 <- rbind(TMS_boxscores_24_RS, TMS_boxscores_24_pi, TMS_boxscores_24_PO)
 
 
-### Playoff Logs ====
-url <- 'https://stats.nba.com/stats/leaguegamelog?Counter=1000&DateFrom=&DateTo=&Direction=DESC&ISTRound=&LeagueID=00&PlayerOrTeam=P&Season=2023-24&SeasonType=Playoffs&Sorter=DATE'
+# UNIQUE game IDs ====
+unique_IDs_24 <- unique(TMS_boxscores_24$GAME_ID)
 
-res <- GET(url = url, add_headers(.headers = headers))
 
-json_resp <- fromJSON(content(res, "text"))
 
-po_logs <- data.frame(json_resp[["resultSets"]][["rowSet"]][[1]])
 
-colnames(po_logs) <- json_resp[["resultSets"]][["headers"]][[1]]
 
-# filter for specific GAME ID
-po_logs <- po_logs %>% 
-  filter(GAME_ID == game_id)
+# ROTATION Infos ====
+# Scraping function 
+# rotation_info <- function(game_id) {
+#   
+#   url <- paste0('https://stats.nba.com/stats/gamerotation?GameID=', game_id)
+#   
+#   res <- GET(url = url, add_headers(.headers = headers))
+#   
+#   json_resp <- fromJSON(content(res, 'text'))
+#   
+#   # dataframes for home & away 
+#   # then will merge 
+#   home <- data.frame(json_resp[["resultSets"]][["rowSet"]][[2]])
+#   away <- data.frame(json_resp[["resultSets"]][["rowSet"]][[1]])
+#   
+#   colnames(home) <- json_resp[["resultSets"]][["headers"]][[1]]
+#   colnames(away) <- json_resp[["resultSets"]][["headers"]][[1]]
+#   
+#   home <- home %>%
+#     clean_names() %>%
+#     retype()
+#   
+#   away <- away %>%
+#     clean_names() %>%
+#     retype()
+#   
+#   # one player column 
+#   home$player <- paste0(home$player_first, ' ', home$player_last)
+#   away$player <- paste0(away$player_first, ' ', away$player_last)
+#   
+#   # add location column 
+#   home$location <- 'Home'
+#   away$location <- 'Away'
+#   
+#   # remove & clean some columns
+#   home <- home[, c(14, 13, 8:12, 1:7)]
+#   away <- away[, c(14, 13, 8:12, 1:7)]
+#   
+#   ### merge into one #
+#   df <- rbind(home, away)
+#   
+#   # function to convert time data
+#   convert_to_time_string <- function(seconds) {
+#     time_strings <- sprintf("%02d:%02d", as.integer(seconds) %/% 60, as.integer(seconds) %% 60)
+#     return(time_strings)
+#   }
+#   
+#   # Correct format to in & out time home & away
+#   df$in_time_real <- lapply(df$in_time_real / 10, convert_to_time_string)
+#   df$out_time_real <- lapply(df$out_time_real / 10, convert_to_time_string)
+#   
+#   # epoch to convert to UNIX time
+#   date <- as.Date("2000-01-01")
+#   
+#   # Convert "mm:ss" to Unix time (seconds since Unix Epoch)
+#   df$in_unix_time <- as.integer(as.POSIXct(paste(date, df$in_time_real), format = "%Y-%m-%d %M:%S"))
+#   df$out_unix_time <- as.integer(as.POSIXct(paste(date, df$out_time_real), format = "%Y-%m-%d %M:%S"))
+#   
+#   # remove some columns
+#   #df <- df[, -c(7, 9:14)]
+#   
+#   return(df)
+#   
+# }
+# 
+# 
+# rot <- rotation_info('0022300001')
+# 
+# # map all single dfs into one 
+# tic()
+# fin <- map_df(unique_IDs_24, rotation_info)
+# toc()
+
+
+### Load CSV Rotations 2023-24 ====
+##### RS ---- 
+rotations_24_RS <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/Rotations/2023-24/Rotations_2023-24_RS.csv')
+
+rotations_24_RS$type <- 'RS'
+
+##### Play-in ----
+rotations_24_pi <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/Rotations/2023-24/Rotations_2023-24_pi.csv')
+
+rotations_24_pi$type <- 'pi'
+
+##### Playoffs ----
+rotations_24_PO <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/Rotations/2023-24/Rotations_2023-24_PO.csv')
+
+rotations_24_PO$type <- 'PO'
+
+
+# merge into one
+### Rotations 2023-24 ====
+rotations_24 <- rbind(rotations_24_RS, rotations_24_pi, rotations_24_PO)
+
+
+
+
+
+
+
+# Players BOXSCORES Infos ####
+# headers <- c(
+#     `Connection` = 'keep-alive',
+#     `Accept` = 'application/json, text/plain, */*',
+#     `x-nba-stats-token` = 'true',
+#     `X-NewRelic-ID` = 'VQECWF5UChAHUlNTBwgBVw==',
+#     `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+#     `x-nba-stats-origin` = 'stats',
+#     `Sec-Fetch-Site` = 'same-origin',
+#     `Sec-Fetch-Mode` = 'cors',
+#     `Referer` = 'https://stats.nba.com/players/shooting/',
+#     `Accept-Encoding` = 'gzip, deflate, br',
+#     `Accept-Language` = 'en-US,en;q=0.9'
+#   )
+# 
+# url <- 'https://stats.nba.com/stats/leaguegamelog?Counter=1000&DateFrom=&DateTo=&Direction=DESC&ISTRound=&LeagueID=00&PlayerOrTeam=P&Season=2023-24&SeasonType=Playoffs&Sorter=DATE'
+# 
+# res <- GET(url = url, add_headers(.headers = headers))
+# 
+# json_resp <- fromJSON(content(res, "text"))
+# 
+# rs_logs <- data.frame(json_resp[["resultSets"]][["rowSet"]][[1]])
+# 
+# colnames(rs_logs) <- json_resp[["resultSets"]][["headers"]][[1]]
+
+
+### Load CSV PL Boxscores 2023-24 ====
+##### RS ----
+PL_boxscores_24_RS <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/PlayerBoxscore/2023-24/Player_boxscores_2023-24_RS.csv')
+
+PL_boxscores_24_RS$type <- 'RS'
+
+##### Play-In ----
+PL_boxscores_24_pi <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/PlayerBoxscore/2023-24/Player_boxscores_2023-24_pi.csv')
+
+PL_boxscores_24_pi$type <- 'pi'
+
+##### Playoffs ----
+PL_boxscores_24_PO <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/PlayerBoxscore/2023-24/Player_boxscores_2023-24_PO.csv')
+
+PL_boxscores_24_PO$type <- 'PO'
+
+
+# merge into one
+### Players Boxscores 2023-24 ====
+PL_boxscores_24 <- rbind(PL_boxscores_24_RS, PL_boxscores_24_pi, PL_boxscores_24_PO)
+
+
+
+
+
+
+
+
+
+
+# filter for specific GAME IDs
+rs_logs <- rs_logs %>% 
+  filter(
+    GAME_ID == trial[1] | GAME_ID == trial[2]
+    )
 
 # change column name to merge 
-colnames(po_logs)[3] <- 'player'
+colnames(rs_logs)[3] <- 'player'
 
 # numeric PTS column for after
-po_logs$PTS <- as.numeric(po_logs$PTS)
+rs_logs$PTS <- as.numeric(rs_logs$PTS)
 
 
 
-# MERGE into one df
-final <- merge(df, po_logs, by = 'player')
+# FINAL DF ====
+final <- merge(fin, rs_logs, by = 'player')
+
+
+
+
+
+
+
 
 # remove unnecessary columns
 final <- final[, -c(10:12, 14,15, 17, 20:36, 39, 40)]
@@ -151,22 +278,26 @@ final <- final %>%
   arrange(factor(location, levels = c("Home", "Away")))
 
 
-# abbreviate the name to initial . 
-final$short_player <- gsub("(\\w)\\w* ", "\\1. ", final$player)
 
-
-
-##### Players NAMES -----
-# final$short_player[final$player == ''] <- ''
-final$short_player[final$player == 'Marcus Morris Sr.'] <- 'M. Morris Sr.'
-final$short_player[final$player == 'Karl-Anthony Towns'] <- 'K. Towns'
-final$short_player[final$player == 'Michael Porter Jr.'] <- 'M. Porter Jr.'
-final$short_player[final$player == 'Dereck Lively II'] <- 'D. Lively II'
-final$short_player[final$player == 'Derrick Jones Jr.'] <- 'D. Jones Jr.'
-final$short_player[final$player == 'Tim Hardaway Jr.'] <- 'T. Hardaway Jr.'
-
-
-
+# Abbreviate names
+# distinguishies between 2-wrd and 3-wrd names 
+final$short_player <- sapply(final$player, function(name) {
+  # Split the name by spaces
+  parts <- unlist(strsplit(name, " "))
+  
+  # If there are three words, return first initial, second word, and third word
+  if (length(parts) == 3) {
+    return(paste0(substr(parts[1], 1, 1), ". ", parts[2], " ", parts[3]))  # First initial, second, and third word
+  }
+  
+  # If there are exactly two words, return first initial and second word (full last name)
+  if (length(parts) == 2) {
+    return(paste0(substr(parts[1], 1, 1), ". ", parts[2]))  # First initial and full second word (last name)
+  }
+  
+  # If the name does not match the expected pattern, return the original name
+  return(name)
+})
 
 
 
@@ -177,7 +308,9 @@ final <- final %>%
 
 
 # merge shortened name with clean plus/minus
-final$axis <- paste0(final$short_player, ' (', final$MIN , ' min, ' , final$PLUS_MINUS, ')')
+final$pm_info <- paste0(final$short_player, ' (', final$MIN , ' min, ' , final$PLUS_MINUS, ')')
+final$pts_info <- paste0(final$short_player, ' (', final$MIN , ' min, ' , final$PTS, ' pts)')
+
 
 
 # Add a unique identifier for each player
@@ -196,14 +329,13 @@ df_end$ymax <- df_end$player_id + 0.35
 
 
 
-##### Teams Colors ====
+# TEAMS INFOS ====
 playing_teams <- data.frame(
   slugTeam = unique(df_end$TEAM_ABBREVIATION),
   loc = unique(df_end$location)
 )
 
 teams <- merge(playing_teams, tms, by = 'slugTeam')
-
 
 # Game Date
 game_date <- unique(df_end$GAME_DATE) %>% 
@@ -229,8 +361,7 @@ home_points <- sum(po_logs$PTS[po_logs$TEAM_NAME == home_team])
 
 # ROTATION PLOT ####
 
-rotation 
-rotation <- df_end %>%
+df_end %>%
   ggplot(aes(ymin = ymin, ymax = ymax, xmin = in_unix_time, xmax = out_unix_time, fill = pt_diff)) +
   geom_rect(color = 'black') +
   geom_label(
@@ -244,12 +375,12 @@ rotation <- df_end %>%
       label = pt_diff)
   ) +
   scale_x_continuous(breaks = c(946681200, 946681920, 946682640, 946683360, 946684080),
-                     labels = c("", "", "", "", ""), 
+                     labels = c("0", "12", "24", "36", "48"), 
                      guide = 'prism_minor', 
                      limits = c(946681200, 946684080),
                      minor_breaks = seq(946681200, 946684080, 60)
   ) +
-  scale_y_continuous(breaks = df_end$player_id, labels = df_end$axis) +
+  scale_y_continuous(breaks = df_end$player_id, labels = df_end$pm_info) +
   scale_fill_gradient2(low = 'firebrick3', mid = 'floralwhite', high = 'forestgreen') +
   facet_grid(
     TEAM_ABBREVIATION ~ ., 
@@ -262,19 +393,17 @@ rotation <- df_end %>%
     
     title = paste(
       away_team, '-', away_points, '@', home_points, '-', home_team
-    ),
-    
-    ##### SERIES INFO ----  
-    subtitle = paste0(game_date, ' - ', 'Game 6: DAL wins series 4 - 2')
+    )
     
   ) + 
   theme_minimal() +
   coord_cartesian(xlim = c(946681328, 946683952)) +
   theme(
-    text = element_text(family='PT Mono', color = 'black'), 
+    
+    text = element_text(family='Menlo', color = 'black'), 
     axis.title.x = element_text(face='bold', size=23, margin=margin(t=7)),
     axis.text.y = element_text(margin = margin(r = 5, unit = "pt"), hjust = 0.95, color = 'black', size = 15), 
-    axis.text.x = element_blank(),
+    axis.text.x = element_text(margin = margin(t = 5, unit = "pt"), color = 'black', size = 15), 
     axis.ticks.x = element_line(color = 'black'),
     
     plot.background = element_rect(color = 'white'),
@@ -283,10 +412,7 @@ rotation <- df_end %>%
     plot.subtitle=element_text(size=17, hjust = 0.35, margin = margin(t = 20, b = 15)), 
     
     ##### Plot TITLE ====
-    # plot.title = element_text(face='bold', size=30, hjust = 0.9, margin = margin(t = 10)), # CLE - BOS 
-    plot.title = element_text(face='bold', size=30, hjust = 0.9, margin = margin(t = 10)), # MIN - DEN 
-    # plot.title = element_text(face='bold', size=30, hjust = 0.2, margin = margin(t = 10)), # IND - NYK 
-    
+    plot.title = element_text(face='bold', size=30, hjust = 0.9, margin = margin(t = 10, b = 10)), 
     
     panel.grid = element_line(color = "#afa9a9"),
     panel.grid.major.y = element_blank(), 
@@ -319,9 +445,8 @@ rotation <- df_end %>%
     )
   )
 
-rotation
-
-
 
 ggsave(paste0('/Users/davidetissino/Desktop/rotation', game_id, '.png'), dpi = 'retina', height = 6, width = 10)
+
+
 

@@ -16,7 +16,78 @@ library(ggimage)
 library(ggpubr)
 
 
-pbp <- play_by_play(game_ids = game_id)
+# csv with team names, slugs, colors 
+tms <- read_csv('/Users/davidetissino/Desktop/R/data/teams.csv')
+
+# increase buffer size for scraping
+Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 2)
+
+
+
+
+
+# Load libraries
+library(dplyr)
+library(readr)  # or you can use read.csv which comes with base R
+
+# Step 1: Set the working directory to the folder where your CSVs are stored
+setwd("/Users/davidetissino/Desktop/samos/game_rotations/2023-24_po")  # Replace with your actual folder path
+
+# Step 2: Get a list of all CSV files in the folder
+file_list <- list.files(pattern = "*.csv")  # Adjust if files have different extensions
+
+# Step 3: Read all CSVs into a list of data frames
+df_list <- lapply(file_list, read_csv)  # or use read.csv for base R
+
+# Step 4: Combine all data frames into a single dataframe
+# If all CSVs have the same structure:
+combined_df <- bind_rows(df_list)
+
+combined_df <- combined_df[, -1]
+
+
+
+
+
+
+## 2023-24 RS Team Logs ####
+# headers <- c(
+#   `Connection` = 'keep-alive',
+#   `Accept` = 'application/json, text/plain, */*',
+#   `x-nba-stats-token` = 'true',
+#   `X-NewRelic-ID` = 'VQECWF5UChAHUlNTBwgBVw==',
+#   `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+#   `x-nba-stats-origin` = 'stats',
+#   `Sec-Fetch-Site` = 'same-origin',
+#   `Sec-Fetch-Mode` = 'cors',
+#   `Referer` = 'https://stats.nba.com/players/shooting/',
+#   `Accept-Encoding` = 'gzip, deflate, br',
+#   `Accept-Language` = 'en-US,en;q=0.9'
+# )
+# 
+# url <- 'https://stats.nba.com/stats/leaguegamelog?Counter=1000&DateFrom=&DateTo=&Direction=DESC&ISTRound=&LeagueID=00&PlayerOrTeam=T&Season=2023-24&SeasonType=Regular%20Season&Sorter=DATE'
+# 
+# res <- GET(url = url, add_headers(.headers = headers))
+# 
+# json_resp <- fromJSON(content(res, "text"))
+# 
+# rs_logs_24 <- data.frame(json_resp$resultSets$rowSet)
+# 
+# colnames(rs_logs_24) <- json_resp[["resultSets"]][["headers"]][[1]]  
+
+
+##### Load CSV ====
+rs_logs_24 <- read.csv('/Users/davidetissino/Desktop/R/RotationPlot/Data/TeamsLogs24.csv')
+
+# UNIQUE game IDs ====
+unique_IDs_24 <- unique(rs_logs_24$GAME_ID)
+
+
+
+## PBP Margin Data nbastatR ====
+
+pbp <- play_by_play(game_ids = '0022300001')
+
 
 pbp <- pbp[, - c(1, 4:12, 14:16)]
 
